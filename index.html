@@ -368,34 +368,103 @@ async function findOnSpotify(artist, track) {
   }
   return null;
 }
-async function resolve([artist, track]) {
-  if (track) { const hit = await findOnSpotify(artist, track); if (hit) return hit; }
-  const tracks = await artistTopTracks(artist);
-  for (let i = 0; i < 2 && tracks.length; i++) {
-    const hit = await findOnSpotify(artist, pick(tracks.slice(0, 15)));
-    if (hit) return hit;
-  }
-  return null;
+// ---- Spotify ID cache (on this device) — avoids repeat lookups across radios
+const ID_CACHE_MAX = 4000, MISS_TTL = 14 * 864e5;
+let idCache = null;
+const cacheKey = (artist, title) => norm(artist) + "|" + titleKey(title);
+function cacheLoad() { idCache = S.get("idcache", {}); }
+function cacheGet(artist, title) {
+  const e = idCache[cacheKey(artist, title)];
+  if (!e) return undefined;
+  if (e.id === null && Date.now() - e.t > MISS_TTL) return undefined;  // retry old misses
+  return e.id;  // a Spotify track id, or null = known miss
 }
+function cachePut(artist, title, id) { idCache[cacheKey(artist, title)] = { id, t: Date.now() }; }
+function cacheSave() {
+  const keys = Object.keys(idCache);
+  if (keys.length > ID_CACHE_MAX) {
+    keys.sort((a, b) => idCache[a].t - idCache[b].t).slice(0, keys.length - ID_CACHE_MAX).forEach(k => delete idCache[k]);
+  }
+  S.set("idcache", idCache);
+}
+
+// ---- ListenBrainz: artist + title -> Spotify id, many at once, no account needed
+async function listenBrainzLookup(pairs) {
+  const out = new Map();
+  for (let i = 0; i < pairs.length; i += 50) {
+    const chunk = pairs.slice(i, i + 50);
+    try {
+      const ctl = new AbortController(); const timer = setTimeout(() => ctl.abort(), 8000);
+      const r = await fetch("https://labs.api.listenbrainz.org/spotify-id-from-metadata/json", {
+        method: "POST", headers: { "Content-Type": "application/json" }, signal: ctl.signal,
+        body: JSON.stringify(chunk.map(([a, t]) => ({ artist_name: a, release_name: "", track_name: t }))),
+      });
+      clearTimeout(timer);
+      if (!r.ok) continue;
+      const rows = await r.json();
+      rows.forEach((row, k) => {
+        const [a, t] = chunk[k];
+        out.set(cacheKey(a, t), row?.spotify_track_ids?.[0] || null);
+      });
+    } catch { /* ListenBrainz down or slow: fall back to Spotify search */ }
+  }
+  return out;
+}
+
 async function buildRadio(seed, onProgress) {
   const seedName = seed.name, seedArtist = seed.artist || seed.name;
+  const target = RADIO_SIZE - (seed.type === "track" ? 1 : 0);
+  cacheLoad();
+  onProgress?.("Wandering through similar music…");
   const cands = await buildCandidates(seed.type, seedName, seedArtist);
   if (!cands.length) throw new ApiError(404, `Last.fm doesn't know enough about "${seedArtist}" to build a radio. Try another seed.`);
-  const target = RADIO_SIZE - (seed.type === "track" ? 1 : 0);
-  let found = 0;
-  const resolved = await pool(cands, 4, async c => {
-    const r = await resolve(c);
-    if (r) found++;
-    onProgress?.(Math.min(found, target), target);
-    return r;
-  }, () => found >= target);
+
+  // 1. pick up to 2 song titles per artist (anywhere in their top 15)
+  onProgress?.("Picking songs…");
+  const options = await pool(cands, 6, async ([artist, track]) => {
+    if (track) return [track];
+    return shuffle((await artistTopTracks(artist)).slice(0, 15)).slice(0, 2);
+  });
+
+  // 2. cache, then one ListenBrainz batch for everything not cached
+  const unknown = [];
+  cands.forEach(([artist], i) => (options[i] || []).forEach(t => { if (cacheGet(artist, t) === undefined) unknown.push([artist, t]); }));
+  if (unknown.length) {
+    onProgress?.("Matching songs…");
+    const found = await listenBrainzLookup(unknown);
+    for (const [a, t] of unknown) if (found.has(cacheKey(a, t))) cachePut(a, t, found.get(cacheKey(a, t)));
+  }
+  const pickFor = i => {
+    const artist = cands[i][0];
+    for (const t of options[i] || []) { const id = cacheGet(artist, t); if (id) return { uri: "spotify:track:" + id, name: t, artist }; }
+    return null;
+  };
+  const resolved = cands.map((_, i) => pickFor(i));
+
+  // 3. Spotify search only for what's still missing, and only until we have enough
+  let have = new Set(resolved.filter(Boolean).map(r => r.uri)).size;
+  const missing = cands.map((_, i) => i).filter(i => !resolved[i] && (options[i] || []).some(t => cacheGet(cands[i][0], t) === undefined));
+  if (have < target && missing.length) {
+    onProgress?.("Finding the rest on Spotify…");
+    await pool(missing, 3, async i => {
+      const artist = cands[i][0];
+      for (const t of options[i]) {
+        if (cacheGet(artist, t) !== undefined) continue;
+        const hit = await findOnSpotify(artist, t);
+        cachePut(artist, t, hit ? hit.uri.split(":").pop() : null);
+        if (hit) { resolved[i] = hit; have++; return; }
+      }
+    }, () => have >= target);
+  }
+  cacheSave();
+
   let tracks = [], seen = new Set();
   for (const r of resolved) {
     if (r && !seen.has(r.uri)) { seen.add(r.uri); tracks.push(r); }
-    if (tracks.length >= RADIO_SIZE - (seed.type === "track" ? 1 : 0)) break;
+    if (tracks.length >= target) break;
   }
   tracks = shuffle(tracks);
-  if (seed.type === "track" && seed.uri) tracks.unshift({ uri: seed.uri, name: seedName, artist: seedArtist });
+  if (seed.type === "track" && seed.uri) tracks = [{ uri: seed.uri, name: seedName, artist: seedArtist }, ...tracks.filter(t => t.uri !== seed.uri)];
   if (tracks.length < 5) throw new ApiError(404, "Couldn't find enough matching songs on Spotify for that seed.");
   return { title: seedName, seed: seed.type === "track" ? `${seedName} — ${seedArtist}` : seedArtist, tracks };
 }
@@ -699,7 +768,7 @@ $("go").onclick = async () => {
   $("go").disabled = $("reroll").disabled = true;
   setStatus('<span class="spin"></span>Wandering through similar music…');
   try {
-    preview = await buildRadio(seed, (d, n) => setStatus(`<span class="spin"></span>Finding songs on Spotify… ${Math.round(d / n * 100)}%`));
+    preview = await buildRadio(seed, msg => setStatus(`<span class="spin"></span>${esc(msg)}`));
     $("outSeed").textContent = preview.seed;
     $("tracks").innerHTML = preview.tracks.map(t => `<li><span>${esc(t.name)} <span class="a">· ${esc(t.artist)}</span></span></li>`).join("");
     $("out").classList.remove("hidden");
