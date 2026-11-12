@@ -293,10 +293,10 @@ const rand = n => Math.floor(Math.random() * n);
 const pick = arr => arr[rand(arr.length)];
 function shuffle(a) { a = [...a]; for (let i = a.length - 1; i > 0; i--) { const j = rand(i + 1); [a[i], a[j]] = [a[j], a[i]]; } return a; }
 function sample(a, n) { return shuffle(a).slice(0, n); }
-async function pool(items, n, fn) {
+async function pool(items, n, fn, stop = () => false) {
   const out = new Array(items.length); let i = 0;
   await Promise.all(Array.from({ length: Math.min(n, items.length) }, async () => {
-    while (i < items.length) { const k = i++; out[k] = await fn(items[k], k); }
+    while (i < items.length && !stop()) { const k = i++; out[k] = await fn(items[k], k); }
   }));
   return out;
 }
@@ -344,10 +344,20 @@ async function buildCandidates(seedType, seedName, seedArtist) {
 
 async function findOnSpotify(artist, track) {
   const want = norm(artist), wantTitle = titleKey(track);
-  for (const q of [`track:"${track}" artist:"${artist}"`, `${artist} ${track}`]) {
+  for (const [qi, q] of [`track:"${track}" artist:"${artist}"`, `${artist} ${track}`].entries()) {
     let d;
     try { d = await sp("GET", "/search", { params: { q, type: "track", limit: 5 } }); }
-    catch (e) { if (e.status === 401 || e.status === 403) throw e; continue; }
+    catch (e) { if (e.status === 401 || e.status === 403 || e.status === 429) throw e; continue; }
+    if (qi === 0 && (d?.tracks?.items || []).length) {
+      // strict search found something; only accept a match from it (no second search)
+      for (const t of d.tracks.items) {
+        const names = (t.artists || []).map(a => norm(a.name)), got = titleKey(t.name);
+        const titleOk = wantTitle && (got === wantTitle || (Math.min(got.length, wantTitle.length) > 3 && (got.includes(wantTitle) || wantTitle.includes(got))));
+        const artistOk = names.some(n => n === want || (want.length > 3 && (n.includes(want) || want.includes(n))));
+        if (artistOk && titleOk) return { uri: t.uri, name: t.name, artist: t.artists[0].name };
+      }
+      return null;
+    }
     for (const t of d?.tracks?.items || []) {
       const names = (t.artists || []).map(a => norm(a.name));
       const got = titleKey(t.name);
@@ -371,8 +381,14 @@ async function buildRadio(seed, onProgress) {
   const seedName = seed.name, seedArtist = seed.artist || seed.name;
   const cands = await buildCandidates(seed.type, seedName, seedArtist);
   if (!cands.length) throw new ApiError(404, `Last.fm doesn't know enough about "${seedArtist}" to build a radio. Try another seed.`);
-  let done = 0;
-  const resolved = await pool(cands, 6, async c => { const r = await resolve(c); onProgress?.(++done, cands.length); return r; });
+  const target = RADIO_SIZE - (seed.type === "track" ? 1 : 0);
+  let found = 0;
+  const resolved = await pool(cands, 4, async c => {
+    const r = await resolve(c);
+    if (r) found++;
+    onProgress?.(Math.min(found, target), target);
+    return r;
+  }, () => found >= target);
   let tracks = [], seen = new Set();
   for (const r of resolved) {
     if (r && !seen.has(r.uri)) { seen.add(r.uri); tracks.push(r); }
@@ -442,7 +458,14 @@ async function sp(method, path, { params, body } = {}) {
   for (let attempt = 0; ; attempt++) {
     const r = await fetch(u, { method, headers: { Authorization: "Bearer " + await accessToken(), ...(body ? { "Content-Type": "application/json" } : {}) },
       body: body ? JSON.stringify(body) : undefined });
-    if (r.status === 429 && attempt < 3) { await sleep(Math.min(+r.headers.get("Retry-After") || 1, 10) * 1000 + 200); continue; }
+    if (r.status === 429) {
+      const wait = +r.headers.get("Retry-After") || 1;
+      if (wait > 30 || attempt >= 3) {
+        const hrs = wait >= 3600 ? Math.ceil(wait / 3600) + " hour" + (wait >= 7200 ? "s" : "") : Math.ceil(wait / 60) + " min";
+        throw new ApiError(429, `Spotify's limit for your developer app is used up. Try again in about ${hrs}.`);
+      }
+      await sleep(wait * 1000 + 200); continue;
+    }
     if (r.status >= 500 && attempt < 2) { await sleep(500 * (attempt + 1)); continue; }
     if (r.status === 204) return {};
     const text = await r.text();
@@ -456,13 +479,50 @@ async function sp(method, path, { params, body } = {}) {
 }
 
 // ======================================================== Spotify ops
+// ---- search ranking: score every result by how well it matches the query, whatever its type
+function qTokens(s) {
+  return (s || "").normalize("NFKD").replace(/[̀-ͯ]/g, "").toLowerCase()
+    .replace(/&/g, " and ").replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter(Boolean);
+}
+function cleanTitle(s) { return (s || "").replace(/\s*[\(\[].*?[\)\]]/g, "").split(/\s+-\s+/)[0]; }
+function matchScore(q, cand) {
+  const qt = qTokens(q), ct = qTokens(cand);
+  if (!qt.length || !ct.length) return 0;
+  const qs = qt.join(" "), cs = ct.join(" ");
+  if (qs === cs) return 1.5;
+  let hit = 0;
+  qt.forEach((t, i) => { if (ct.includes(t) || (i === qt.length - 1 && ct.some(c => c.startsWith(t)))) hit++; });
+  let s = hit / qt.length - 0.15 * Math.max(0, ct.length - qt.length) / ct.length;
+  if (cs.startsWith(qs)) s += 0.2;
+  return s;
+}
+function rankResults(q, results) {
+  const seen = new Set(), out = [];
+  const rankIn = { artist: 0, track: 0 };
+  for (const r of results) {
+    const i = rankIn[r.type]++;
+    let score;
+    if (r.type === "artist") score = matchScore(q, r.name);
+    else {
+      const t = cleanTitle(r.name);
+      score = Math.max(matchScore(q, t), matchScore(q, t + " " + r.artist), matchScore(q, r.artist + " " + t)) + 0.01;
+      const key = qTokens(t).join(" ") + "|" + qTokens(r.artist).join(" ");
+      if (seen.has(key)) continue;  // drop remaster/live duplicates of the same song
+      seen.add(key);
+    }
+    score += -0.03 * i + (typeof r.popularity === "number" ? 0.002 * r.popularity : 0);
+    out.push({ ...r, score });
+  }
+  return out.sort((a, b) => b.score - a.score).slice(0, 8);
+}
+
 async function search(q) {
-  const d = await sp("GET", "/search", { params: { q, type: "artist,track", limit: 5 } });
+  const d = await sp("GET", "/search", { params: { q, type: "artist,track", limit: 6 } });
   const img = imgs => (imgs && imgs.length) ? imgs[imgs.length - 1].url : null;
-  return [
-    ...(d.artists?.items || []).map(a => ({ type: "artist", name: a.name, artist: a.name, image: img(a.images) })),
-    ...(d.tracks?.items || []).map(t => ({ type: "track", name: t.name, artist: t.artists?.[0]?.name || "", image: img(t.album?.images), uri: t.uri })),
-  ];
+  return rankResults(q, [
+    ...(d.artists?.items || []).map(a => ({ type: "artist", name: a.name, artist: a.name, image: img(a.images), popularity: a.popularity })),
+    ...(d.tracks?.items || []).map(t => ({ type: "track", name: t.name, artist: t.artists?.[0]?.name || "", image: img(t.album?.images), uri: t.uri, popularity: t.popularity })),
+  ]);
 }
 async function nowPlaying() {
   const d = await sp("GET", "/me/player/currently-playing");
@@ -600,10 +660,10 @@ $("login").onclick = () => login().catch(e => { $("authStatus").textContent = e.
 $("logout").onclick = () => { S.del("tokens"); render(); };
 
 // search
-$("q").addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(doSearch, 300); });
+$("q").addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(doSearch, 450); });
 async function doSearch() {
   const q = $("q").value.trim(), mine = ++searchSeq;
-  if (!q) { $("results").innerHTML = ""; return; }
+  if (q.length < 2) { $("results").innerHTML = ""; return; }
   try {
     const results = await search(q);
     if (mine !== searchSeq) return;
