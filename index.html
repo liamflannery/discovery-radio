@@ -1,0 +1,671 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Discovery Radio</title>
+<meta name="description" content="Old-school radio for discovering new music on Spotify.">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Discovery">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#121214">
+<style>
+  :root {
+    --bg: #f6f5f2; --panel: #ffffff; --text: #18181a; --muted: #6b6b70;
+    --line: #e4e2dc; --accent: #1db954; --accent-ink: #062b14; --hover: #f0eee9;
+    --error: #c0392b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #121214; --panel: #1b1b1f; --text: #f2f2f3; --muted: #9a9aa2;
+      --line: #2c2c33; --accent: #1ed760; --accent-ink: #04140a; --hover: #24242a;
+      --error: #ff7a6b;
+    }
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 16px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif;
+  }
+  main {
+    max-width: 560px; margin: 0 auto;
+    padding: calc(env(safe-area-inset-top) + 28px) max(16px, env(safe-area-inset-right)) calc(env(safe-area-inset-bottom) + 40px) max(16px, env(safe-area-inset-left));
+  }
+  header { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
+  header img { width: 44px; height: 44px; border-radius: 11px; }
+  h1 { font-size: 24px; letter-spacing: -0.02em; margin: 0; }
+  .sub { color: var(--muted); margin: 0; font-size: 14px; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 16px; margin-top: 14px; }
+  input {
+    width: 100%; padding: 13px 14px; font: inherit; font-size: 16px; color: var(--text);
+    background: var(--bg); border: 1px solid var(--line); border-radius: 12px; outline: none;
+  }
+  input:focus { border-color: var(--accent); }
+  button, .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px;
+    padding: 11px 18px; font: inherit; font-weight: 600; border: 0; border-radius: 999px;
+    background: var(--accent); color: var(--accent-ink); cursor: pointer; text-decoration: none;
+  }
+  button:disabled { opacity: .45; }
+  .ghost { background: transparent; color: var(--text); border: 1px solid var(--line); font-weight: 500; }
+  .wide { width: 100%; }
+  code { background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 2px 6px; font-size: 13px; }
+  a { color: var(--accent); }
+  .note { color: var(--muted); font-size: 14px; }
+  .hidden { display: none !important; }
+
+  .results { list-style: none; margin: 6px 0 0; padding: 0; }
+  .results li { display: flex; align-items: center; gap: 12px; padding: 8px; border-radius: 12px; cursor: pointer; }
+  .results li:active, .results li.sel { background: var(--hover); }
+  .results li.sel { outline: 2px solid var(--accent); }
+  .thumb { width: 44px; height: 44px; border-radius: 6px; background: var(--line); object-fit: cover; flex: none; }
+  .thumb.round { border-radius: 50%; }
+  .meta { min-width: 0; }
+  .meta b { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
+  .meta span { color: var(--muted); font-size: 13px; }
+  .row { display: flex; gap: 10px; align-items: center; margin-top: 14px; }
+  .grow { flex: 1; min-width: 0; }
+  .status { color: var(--muted); font-size: 14px; margin-top: 12px; min-height: 20px; }
+  .status.err { color: var(--error); }
+  .tracks { list-style: none; padding: 0; margin: 10px 0 0; counter-reset: n; }
+  .tracks li { display: flex; gap: 10px; padding: 7px 0; border-top: 1px solid var(--line); font-size: 15px; }
+  .tracks li::before { counter-increment: n; content: counter(n); color: var(--muted); width: 22px; text-align: right; flex: none; font-variant-numeric: tabular-nums; }
+  .tracks .a { color: var(--muted); }
+  .slots { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 12px; }
+  .slot { border: 1px solid var(--line); border-radius: 12px; padding: 10px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+  .slot .k { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+  .slot .v { font-weight: 600; font-size: 13px; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; min-height: 2.7em; overflow-wrap: anywhere; }
+  .slot .v.empty { color: var(--muted); font-weight: 400; }
+  .slot button { padding: 8px 6px; font-size: 14px; min-height: 40px; white-space: nowrap; }
+  .slot a.open { font-size: 12px; color: var(--muted); min-height: 1.4em; }
+  .slot.flash { outline: 2px solid var(--accent); }
+  .foot { margin-top: 18px; font-size: 13px; color: var(--muted); display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  .foot button { background: none; color: var(--muted); padding: 0; min-height: 0; font-weight: 400; text-decoration: underline; font-size: 13px; }
+  .spin { width: 14px; height: 14px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: s .7s linear infinite; display: inline-block; vertical-align: -2px; margin-right: 6px; }
+  @keyframes s { to { transform: rotate(360deg); } }
+
+  .step { margin-top: 18px; }
+  .step-h { display: flex; align-items: center; gap: 10px; }
+  .num { width: 28px; height: 28px; border-radius: 50%; background: var(--accent); color: var(--accent-ink); display: grid; place-items: center; font-weight: 700; font-size: 14px; flex: none; }
+  .step.done .num { background: var(--hover); color: var(--accent); }
+  .step-h b { font-size: 16px; }
+  .step-h .tag { margin-left: auto; font-size: 13px; color: var(--accent); }
+  .step-body { margin-top: 10px; }
+  .step.done .step-body { display: none; }
+  .links { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0 4px; }
+  .links .btn { font-size: 14px; }
+  .fields { margin: 8px 0 0; padding: 0; list-style: none; }
+  .fields li { display: flex; align-items: center; gap: 8px; padding: 7px 0; border-top: 1px solid var(--line); flex-wrap: wrap; }
+  .fields li:first-child { border-top: 0; }
+  .fields .lbl { color: var(--muted); font-size: 13px; width: 100%; }
+  .fields code { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  .copy { padding: 5px 12px; min-height: 34px; font-size: 13px; font-weight: 500; background: var(--hover); color: var(--text); border: 1px solid var(--line); }
+  .copy.ok { color: var(--accent); }
+  ol.how { padding-left: 20px; margin: 10px 0 0; font-size: 15px; } ol.how li { margin: 6px 0; }
+  details { margin-top: 14px; }
+  summary { cursor: pointer; color: var(--muted); font-size: 14px; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <img src="icon-180.png" alt="">
+    <div><h1>Discovery Radio</h1><p class="sub">Pick a song or artist. Get a playlist that wanders off from it.</p></div>
+  </header>
+
+  <div id="installTip" class="panel hidden">
+    <b>Add this to your Home Screen first</b>
+    <p class="note" style="margin:6px 0 0">Tap <b>Share</b> <span aria-hidden="true">⬆︎</span> then <b>Add to Home Screen</b>, and open Discovery Radio from its icon. Do the setup there: on iPhone, the Home Screen app keeps its own storage, separate from Safari.</p>
+    <button id="dismissTip" class="ghost wide" style="margin-top:12px">Set up here anyway</button>
+  </div>
+
+  <!-- Setup -->
+  <section id="setup" class="hidden">
+    <div class="panel">
+      <b style="font-size:17px">Welcome! Let's get you set up.</b>
+      <p class="note" style="margin:6px 0 0">Three steps, about 5 minutes, done once. You'll need <b>Spotify Premium</b> (Spotify requires it for developer apps) and a free Last.fm account. Your keys and login are stored only on this device.</p>
+
+      <details id="codeBox">
+        <summary>Already set up on a computer? Paste a setup code</summary>
+        <input id="setupCode" placeholder="DR1:…" autocomplete="off" autocapitalize="off" spellcheck="false" style="margin-top:10px">
+        <p class="note">You still need to add this page's Redirect URI (step 1) to your Spotify app.</p>
+      </details>
+
+      <div id="step1" class="step">
+        <div class="step-h"><span class="num">1</span><b>Create a Spotify developer app</b><span class="tag hidden">✓ Done</span></div>
+        <div class="step-body">
+          <div class="links"><a class="btn" href="https://developer.spotify.com/dashboard" target="_blank" rel="noopener">Open Spotify Developer Dashboard ↗</a></div>
+          <p class="note">Log in, then click <b>Create app</b>. If you already made one on a computer, open it, click <b>Edit</b>, and just add the Redirect URI below.</p>
+          <ol class="how">
+            <li>Fill in the form:
+              <ul class="fields">
+                <li><span class="lbl">App name</span><code>Discovery Radio</code><button class="copy" data-copy="Discovery Radio">Copy</button></li>
+                <li><span class="lbl">App description</span><code>Personal music discovery radio</code><button class="copy" data-copy="Personal music discovery radio">Copy</button></li>
+                <li><span class="lbl">Redirect URI</span><code class="redir"></code><button class="copy" data-copy-redir>Copy</button></li>
+              </ul>
+            </li>
+            <li>After pasting the Redirect URI, tap <b>Add</b>.</li>
+            <li>Tick <b>Web API</b> and the terms box, then <b>Save</b>.</li>
+            <li>Copy the <b>Client ID</b> (not the secret) and paste it here:</li>
+          </ol>
+          <input id="cid" placeholder="Spotify Client ID" autocomplete="off" autocapitalize="off" spellcheck="false" style="margin-top:8px">
+        </div>
+      </div>
+
+      <div id="step2" class="step">
+        <div class="step-h"><span class="num">2</span><b>Get a free Last.fm API key</b><span class="tag hidden">✓ Done</span></div>
+        <div class="step-body">
+          <div class="links">
+            <a class="btn ghost" href="https://www.last.fm/join" target="_blank" rel="noopener">Sign up ↗</a>
+            <a class="btn" href="https://www.last.fm/api/account/create" target="_blank" rel="noopener">Open Last.fm API form ↗</a>
+          </div>
+          <ol class="how">
+            <li>Enter your email and <b>Discovery Radio</b> as the application name. Leave the other fields empty and <b>Submit</b>.</li>
+            <li>Copy the <b>API key</b> (not the shared secret) and paste it here:</li>
+          </ol>
+          <input id="lfm" placeholder="Last.fm API key" autocomplete="off" autocapitalize="off" spellcheck="false" style="margin-top:8px">
+        </div>
+      </div>
+
+      <button id="saveCfg" class="wide" style="margin-top:18px">Save and check</button>
+      <div id="setupStatus" class="status"></div>
+    </div>
+  </section>
+
+  <!-- Connect -->
+  <section id="connect" class="panel hidden">
+    <div class="step-h"><span class="num">3</span><b>Connect your Spotify account</b></div>
+    <p class="note" style="margin:10px 0 14px">This lets the app see what you're playing and manage your three radio playlists. Spotify will ask you to <b>Agree</b>.</p>
+    <button id="login" class="wide">Connect Spotify</button>
+    <div id="authStatus" class="status err"></div>
+    <div class="foot"><button id="changeKeys">Change keys</button></div>
+  </section>
+
+  <!-- Main -->
+  <section id="app" class="hidden">
+    <div class="panel">
+      <button id="np" class="ghost wide">▶ Use what I'm playing</button>
+      <input id="q" type="search" placeholder="Search a song or artist…" autocomplete="off" autocapitalize="off" spellcheck="false" style="margin-top:12px">
+      <ul id="results" class="results"></ul>
+      <div class="row">
+        <div class="grow meta" id="seedLabel" style="color:var(--muted)">Nothing selected</div>
+        <button id="go" disabled>Create Radio</button>
+      </div>
+      <div id="status" class="status"></div>
+    </div>
+
+    <div id="out" class="panel hidden">
+      <div class="row" style="margin-top:0">
+        <div class="grow"><span class="note">Preview</span><br><b id="outSeed"></b></div>
+        <button id="reroll" class="ghost">↻ New mix</button>
+      </div>
+      <ul id="tracks" class="tracks"></ul>
+      <p class="note" style="margin:12px 0 0">Like it? Send it to a slot below. This replaces whatever is in that slot.</p>
+    </div>
+
+    <div class="panel">
+      <b>Your slots</b>
+      <div id="slots" class="slots"></div>
+    </div>
+
+    <div class="foot">
+      <span>Save songs you like to another playlist before overwriting a slot.</span>
+      <button id="logout">Disconnect</button>
+    </div>
+  </section>
+</main>
+
+<script>
+"use strict";
+// ======================================================== storage
+const S = {
+  get(k, d = null) { try { const v = localStorage.getItem("dr_" + k); return v === null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem("dr_" + k, JSON.stringify(v)); } catch {} },
+  del(k) { try { localStorage.removeItem("dr_" + k); } catch {} },
+};
+const REDIRECT_URI = location.origin + location.pathname.replace(/index\.html$/, "");
+const SCOPES = "playlist-modify-private playlist-modify-public playlist-read-private user-library-modify user-read-currently-playing user-read-playback-state";
+const RADIO_SIZE = 30;
+const JUNK_TAGS = new Set(["seen live","favorites","favourites","favorite","favourite","love","awesome","beautiful","amazing","albums i own","under 2000 listeners","spotify","my music","cool","best","good","great"]);
+
+class ApiError extends Error { constructor(status, msg) { super(msg); this.status = status; } }
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+// ======================================================== Last.fm
+async function lastfm(method, params = {}, key = S.get("lfm")) {
+  const u = new URL("https://ws.audioscrobbler.com/2.0/");
+  Object.entries({ method, api_key: key, format: "json", autocorrect: 1, ...params }).forEach(([k, v]) => u.searchParams.set(k, v));
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const r = await fetch(u);
+      const j = await r.json().catch(() => ({}));
+      if (j.error) throw new ApiError(400, "Last.fm: " + (j.message || j.error));
+      if (!r.ok) throw new ApiError(r.status, "Last.fm error " + r.status);
+      return j;
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 400) throw e;
+      if (attempt === 2) throw e;
+      await sleep(400 * (attempt + 1));
+    }
+  }
+}
+const asList = x => x == null ? [] : (Array.isArray(x) ? x : [x]);
+const safe = async (p, d = []) => { try { return await p; } catch { return d; } };
+
+async function similarArtists(artist, limit = 60) {
+  const d = await safe(lastfm("artist.getSimilar", { artist, limit }), {});
+  return asList(d?.similarartists?.artist).map(a => a.name);
+}
+async function similarTracks(artist, track, limit = 50) {
+  const d = await safe(lastfm("track.getSimilar", { artist, track, limit }), {});
+  return asList(d?.similartracks?.track).map(t => [t.artist?.name ?? t.artist, t.name]).filter(([a, n]) => a && n);
+}
+async function topTags(artist) {
+  const d = await safe(lastfm("artist.getTopTags", { artist }), {});
+  return asList(d?.toptags?.tag).map(t => (t.name || "").trim().toLowerCase())
+    .filter(n => n && !JUNK_TAGS.has(n) && !/^\d+$/.test(n) && !n.includes(artist.toLowerCase()));
+}
+async function tagArtists(tag, page) {
+  const d = await safe(lastfm("tag.getTopArtists", { tag, limit: 50, page }), {});
+  return asList(d?.topartists?.artist).map(a => a.name);
+}
+async function artistTopTracks(artist) {
+  const d = await safe(lastfm("artist.getTopTracks", { artist, limit: 20 }), {});
+  return asList(d?.toptracks?.track).map(t => t.name).filter(Boolean);
+}
+
+// ======================================================== radio engine
+function norm(s) {
+  return (s || "").normalize("NFKD").replace(/[̀-ͯ]/g, "").toLowerCase()
+    .replace(/^the\s+/, "").replace(/&/g, "and").replace(/[^a-z0-9]/g, "");
+}
+function titleKey(s) {
+  s = (s || "").replace(/\s*[\(\[].*?[\)\]]/g, "");
+  s = s.split(/\s+-\s+/)[0];
+  return norm(s);
+}
+const rand = n => Math.floor(Math.random() * n);
+const pick = arr => arr[rand(arr.length)];
+function shuffle(a) { a = [...a]; for (let i = a.length - 1; i > 0; i--) { const j = rand(i + 1); [a[i], a[j]] = [a[j], a[i]]; } return a; }
+function sample(a, n) { return shuffle(a).slice(0, n); }
+async function pool(items, n, fn) {
+  const out = new Array(items.length); let i = 0;
+  await Promise.all(Array.from({ length: Math.min(n, items.length) }, async () => {
+    while (i < items.length) { const k = i++; out[k] = await fn(items[k], k); }
+  }));
+  return out;
+}
+
+async function buildCandidates(seedType, seedName, seedArtist) {
+  const used = new Set([norm(seedArtist)]);
+  const ring1 = (await similarArtists(seedArtist, 60)).filter(a => !used.has(norm(a)));
+  const expandFrom = ring1.length ? [...sample(ring1.slice(0, 15), 3), ...sample(ring1.slice(15), 4)] : [];
+  const [ring2Lists, tags, trackPool] = await Promise.all([
+    pool(expandFrom, 6, a => similarArtists(a, 30)),
+    topTags(seedArtist),
+    seedType === "track" ? similarTracks(seedArtist, seedName, 50) : Promise.resolve([]),
+  ]);
+  const ring1Keys = new Set(ring1.map(norm));
+  const ring2 = [], seen2 = new Set();
+  for (const lst of ring2Lists) for (const a of lst) {
+    const k = norm(a);
+    if (!ring1Keys.has(k) && !used.has(k) && !seen2.has(k)) { seen2.add(k); ring2.push(a); }
+  }
+  let tagPool = [];
+  if (tags.length) {
+    const tag = pick(tags.slice(0, 3));
+    tagPool = (await tagArtists(tag, 1 + rand(4))).filter(a => !ring1Keys.has(norm(a)) && !used.has(norm(a)));
+  }
+  const take = (list, n, withTrack = false) => {
+    const out = [];
+    for (const item of shuffle(list)) {
+      const [a, t] = withTrack ? item : [item, null];
+      const k = norm(a);
+      if (used.has(k)) continue;
+      used.add(k); out.push([a, t]);
+      if (out.length >= n) break;
+    }
+    return out;
+  };
+  const buckets = [];
+  if (trackPool.length) buckets.push(take(trackPool.slice(0, 30), 6, true));
+  buckets.push(take(ring1, trackPool.length ? 13 : 16));
+  buckets.push(take(ring2, 20));
+  buckets.push(take(tagPool, 9));
+  const out = [];
+  while (buckets.some(b => b.length)) for (const b of buckets) if (b.length) out.push(b.shift());
+  return out;
+}
+
+async function findOnSpotify(artist, track) {
+  const want = norm(artist), wantTitle = titleKey(track);
+  for (const q of [`track:"${track}" artist:"${artist}"`, `${artist} ${track}`]) {
+    let d;
+    try { d = await sp("GET", "/search", { params: { q, type: "track", limit: 5 } }); }
+    catch (e) { if (e.status === 401 || e.status === 403) throw e; continue; }
+    for (const t of d?.tracks?.items || []) {
+      const names = (t.artists || []).map(a => norm(a.name));
+      const got = titleKey(t.name);
+      const titleOk = wantTitle && (got === wantTitle || (Math.min(got.length, wantTitle.length) > 3 && (got.includes(wantTitle) || wantTitle.includes(got))));
+      const artistOk = names.some(n => n === want || (want.length > 3 && (n.includes(want) || want.includes(n))));
+      if (artistOk && titleOk) return { uri: t.uri, name: t.name, artist: t.artists[0].name };
+    }
+  }
+  return null;
+}
+async function resolve([artist, track]) {
+  if (track) { const hit = await findOnSpotify(artist, track); if (hit) return hit; }
+  const tracks = await artistTopTracks(artist);
+  for (let i = 0; i < 2 && tracks.length; i++) {
+    const hit = await findOnSpotify(artist, pick(tracks.slice(0, 15)));
+    if (hit) return hit;
+  }
+  return null;
+}
+async function buildRadio(seed, onProgress) {
+  const seedName = seed.name, seedArtist = seed.artist || seed.name;
+  const cands = await buildCandidates(seed.type, seedName, seedArtist);
+  if (!cands.length) throw new ApiError(404, `Last.fm doesn't know enough about "${seedArtist}" to build a radio. Try another seed.`);
+  let done = 0;
+  const resolved = await pool(cands, 6, async c => { const r = await resolve(c); onProgress?.(++done, cands.length); return r; });
+  let tracks = [], seen = new Set();
+  for (const r of resolved) {
+    if (r && !seen.has(r.uri)) { seen.add(r.uri); tracks.push(r); }
+    if (tracks.length >= RADIO_SIZE - (seed.type === "track" ? 1 : 0)) break;
+  }
+  tracks = shuffle(tracks);
+  if (seed.type === "track" && seed.uri) tracks.unshift({ uri: seed.uri, name: seedName, artist: seedArtist });
+  if (tracks.length < 5) throw new ApiError(404, "Couldn't find enough matching songs on Spotify for that seed.");
+  return { title: seedName, seed: seed.type === "track" ? `${seedName} — ${seedArtist}` : seedArtist, tracks };
+}
+
+// ======================================================== Spotify auth (PKCE)
+const b64url = buf => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+async function login() {
+  const verifier = b64url(crypto.getRandomValues(new Uint8Array(48)));
+  const challenge = b64url(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier)));
+  const state = b64url(crypto.getRandomValues(new Uint8Array(16)));
+  S.set("pkce", { verifier, state });
+  const u = new URL("https://accounts.spotify.com/authorize");
+  Object.entries({ client_id: S.get("cid"), response_type: "code", redirect_uri: REDIRECT_URI,
+    code_challenge_method: "S256", code_challenge: challenge, scope: SCOPES, state }).forEach(([k, v]) => u.searchParams.set(k, v));
+  location.assign(u.toString());
+}
+async function tokenRequest(form) {
+  const r = await fetch("https://accounts.spotify.com/api/token", {
+    method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams(form),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new ApiError(r.status, j.error_description || j.error || "Spotify login failed");
+  return j;
+}
+function storeTokens(t, old = {}) {
+  S.set("tokens", { access: t.access_token, refresh: t.refresh_token || old.refresh, exp: Date.now() + (t.expires_in || 3600) * 1000 - 60000 });
+}
+async function handleRedirect() {
+  const p = new URLSearchParams(location.search);
+  if (!p.has("code") && !p.has("error")) return;
+  history.replaceState(null, "", REDIRECT_URI);
+  if (p.get("error")) { $("authStatus").textContent = "Spotify login was cancelled (" + p.get("error") + ")."; return; }
+  const pk = S.get("pkce");
+  if (!pk || pk.state !== p.get("state")) { $("authStatus").textContent = "Login expired. Please try again."; return; }
+  S.del("pkce");
+  try {
+    storeTokens(await tokenRequest({ grant_type: "authorization_code", code: p.get("code"), redirect_uri: REDIRECT_URI,
+      client_id: S.get("cid"), code_verifier: pk.verifier }));
+  } catch (e) { $("authStatus").textContent = e.message; }
+}
+let refreshing = null;
+async function accessToken() {
+  const t = S.get("tokens");
+  if (!t?.refresh) throw new ApiError(401, "Not connected to Spotify");
+  if (Date.now() < t.exp) return t.access;
+  refreshing ||= (async () => {
+    try {
+      storeTokens(await tokenRequest({ grant_type: "refresh_token", refresh_token: t.refresh, client_id: S.get("cid") }), t);
+    } catch (e) {
+      if (e.status === 400 || e.status === 401) { S.del("tokens"); throw new ApiError(401, "Spotify login expired. Please reconnect."); }
+      throw e;
+    } finally { refreshing = null; }
+  })();
+  await refreshing;
+  return S.get("tokens").access;
+}
+async function sp(method, path, { params, body } = {}) {
+  const u = new URL("https://api.spotify.com/v1" + path);
+  if (params) Object.entries(params).forEach(([k, v]) => u.searchParams.set(k, v));
+  for (let attempt = 0; ; attempt++) {
+    const r = await fetch(u, { method, headers: { Authorization: "Bearer " + await accessToken(), ...(body ? { "Content-Type": "application/json" } : {}) },
+      body: body ? JSON.stringify(body) : undefined });
+    if (r.status === 429 && attempt < 3) { await sleep(Math.min(+r.headers.get("Retry-After") || 1, 10) * 1000 + 200); continue; }
+    if (r.status >= 500 && attempt < 2) { await sleep(500 * (attempt + 1)); continue; }
+    if (r.status === 204) return {};
+    const text = await r.text();
+    const j = text ? (() => { try { return JSON.parse(text); } catch { return {}; } })() : {};
+    if (!r.ok) {
+      if (r.status === 401) S.del("tokens");
+      throw new ApiError(r.status, j?.error?.message || j?.error || `Spotify error ${r.status}`);
+    }
+    return j;
+  }
+}
+
+// ======================================================== Spotify ops
+async function search(q) {
+  const d = await sp("GET", "/search", { params: { q, type: "artist,track", limit: 5 } });
+  const img = imgs => (imgs && imgs.length) ? imgs[imgs.length - 1].url : null;
+  return [
+    ...(d.artists?.items || []).map(a => ({ type: "artist", name: a.name, artist: a.name, image: img(a.images) })),
+    ...(d.tracks?.items || []).map(t => ({ type: "track", name: t.name, artist: t.artists?.[0]?.name || "", image: img(t.album?.images), uri: t.uri })),
+  ];
+}
+async function nowPlaying() {
+  const d = await sp("GET", "/me/player/currently-playing");
+  const it = d?.item;
+  if (!it || !(it.uri || "").startsWith("spotify:track:")) return null;
+  const imgs = it.album?.images || [];
+  return { type: "track", name: it.name, artist: it.artists?.[0]?.name || "", image: imgs.length ? imgs[imgs.length - 1].url : null, uri: it.uri, playing: !!d.is_playing };
+}
+
+const SLOT_RE = /\(Slot ([123])\)\s*$/;
+async function discoverSlots() {
+  // Find slot playlists made earlier (e.g. by the Mac app) so phone and computer share them.
+  const slots = S.get("slots", {});
+  if (["1", "2", "3"].every(n => slots[n]?.id)) return;
+  const me = await sp("GET", "/me");
+  let url = "/me/playlists", params = { limit: 50, offset: 0 };
+  for (let page = 0; page < 6; page++) {
+    const d = await sp("GET", url, { params });
+    for (const p of d.items || []) {
+      const m = SLOT_RE.exec(p?.name || "");
+      if (m && p.owner?.id === me.id && !slots[m[1]]?.id) slots[m[1]] = { id: p.id, name: p.name, seed: p.name.replace(/\s*Radio \(Slot \d\)\s*$/, "") };
+    }
+    if (!d.next) break;
+    params.offset += 50;
+  }
+  S.set("slots", slots);
+}
+async function sendToSlot(slot, preview) {
+  const slots = S.get("slots", {});
+  let title = (preview.title || "Discovery").trim();
+  if (title.length > 70) title = title.slice(0, 69).trim() + "…";
+  const name = `${title} Radio (Slot ${slot})`;
+  const description = `Radio from: ${preview.seed}. Made by Discovery Radio — save songs you like elsewhere, this slot gets overwritten.`;
+  let id = slots[slot]?.id;
+  if (id) {
+    try { await sp("GET", `/playlists/${id}`, { params: { fields: "id" } }); }
+    catch (e) { if (e.status === 404 || e.status === 403) id = null; else throw e; }
+  }
+  if (id) {
+    await sp("PUT", `/playlists/${id}`, { body: { name, description } });
+    sp("PUT", "/me/library", { params: { uris: `spotify:playlist:${id}` } }).catch(() => {});
+  } else {
+    id = (await sp("POST", "/me/playlists", { body: { name, public: false, description } })).id;
+  }
+  await sp("PUT", `/playlists/${id}/items`, { body: { uris: preview.tracks.map(t => t.uri).slice(0, 100) } });
+  slots[slot] = { id, name, seed: preview.seed };
+  S.set("slots", slots);
+  return { name, url: `https://open.spotify.com/playlist/${id}` };
+}
+
+// ======================================================== UI
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+let seed = null, preview = null, sending = false, timer = null, searchSeq = 0, editingKeys = false;
+const isStandalone = matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+
+function setStatus(msg, err) { $("status").className = "status" + (err ? " err" : ""); $("status").innerHTML = msg; }
+function handleErr(e) {
+  if (e.status === 401) { render(); return; }
+  setStatus(esc(e.message), true);
+}
+
+function render() {
+  const configured = !!(S.get("cid") && S.get("lfm"));
+  const connected = !!S.get("tokens")?.refresh;
+  document.querySelectorAll(".redir").forEach(el => el.textContent = REDIRECT_URI);
+  const showTip = isIOS && !isStandalone && !configured && !S.get("tipDismissed");
+  $("installTip").classList.toggle("hidden", !showTip);
+  $("setup").classList.toggle("hidden", showTip || (configured && !editingKeys));
+  for (const [id, done] of [["step1", !!S.get("cid")], ["step2", !!S.get("lfm")]]) {
+    $(id).classList.toggle("done", done && !editingKeys);
+    $(id).querySelector(".tag").classList.toggle("hidden", !done || editingKeys);
+  }
+  $("connect").classList.toggle("hidden", !configured || connected || editingKeys);
+  $("app").classList.toggle("hidden", !(configured && connected) || editingKeys);
+  if (configured && connected) renderSlots();
+}
+
+function renderSlots(flash) {
+  const slots = S.get("slots", {});
+  $("slots").innerHTML = ["1", "2", "3"].map(n => {
+    const sl = slots[n] || {};
+    return `<div class="slot ${flash === n ? "flash" : ""}">
+      <div class="k">Slot ${n}</div>
+      <div class="v ${sl.seed ? "" : "empty"}">${esc(sl.seed || "Empty")}</div>
+      <button data-slot="${n}" ${preview && !sending ? "" : "disabled"}>Send</button>
+      ${sl.id ? `<a class="open" href="https://open.spotify.com/playlist/${esc(sl.id)}" target="_blank" rel="noopener">Open ↗</a>` : `<span class="open"></span>`}
+    </div>`;
+  }).join("");
+  $("slots").querySelectorAll("button[data-slot]").forEach(b => b.onclick = () => doSend(b.dataset.slot));
+}
+
+// setup
+document.querySelectorAll(".copy").forEach(b => b.onclick = async () => {
+  const text = b.hasAttribute("data-copy-redir") ? REDIRECT_URI : b.dataset.copy;
+  try { await navigator.clipboard.writeText(text); } catch {
+    const t = document.createElement("textarea"); t.value = text; document.body.appendChild(t); t.select(); document.execCommand("copy"); t.remove();
+  }
+  b.textContent = "Copied ✓"; b.classList.add("ok");
+  setTimeout(() => { b.textContent = "Copy"; b.classList.remove("ok"); }, 1500);
+});
+$("dismissTip").onclick = () => { S.set("tipDismissed", true); render(); };
+$("changeKeys").onclick = () => { editingKeys = true; render(); };
+
+$("saveCfg").onclick = async () => {
+  const st = $("setupStatus");
+  let cid = $("cid").value.trim(), lfm = $("lfm").value.trim();
+  const code = $("setupCode").value.trim();
+  if (code) {
+    const m = /^DR1:([0-9a-fA-F]{32}):([0-9a-fA-F]{32})$/.exec(code);
+    if (!m) { st.className = "status err"; st.textContent = "That setup code doesn't look right. It should start with DR1:"; return; }
+    [cid, lfm] = [m[1], m[2]];
+  }
+  if (!cid && !S.get("cid")) { st.className = "status err"; st.textContent = "Paste your Spotify Client ID in step 1."; return; }
+  if (!lfm && !S.get("lfm")) { st.className = "status err"; st.textContent = "Paste your Last.fm API key in step 2."; return; }
+  if (cid && !/^[0-9a-fA-F]{32}$/.test(cid)) { st.className = "status err"; st.textContent = "That doesn't look like a Spotify Client ID. It's 32 letters and numbers (copy the Client ID, not the secret)."; return; }
+  $("saveCfg").disabled = true; st.className = "status"; st.textContent = "Checking…";
+  try {
+    if (lfm) {
+      try { await lastfm("artist.getInfo", { artist: "Radiohead" }, lfm); }
+      catch (e) { throw new ApiError(400, e.status === 400 ? "Last.fm didn't accept that API key. Copy the 'API key' (not the shared secret)." : "Couldn't reach Last.fm. Check your connection."); }
+      S.set("lfm", lfm);
+    }
+    if (cid) {
+      if (cid !== S.get("cid")) { S.del("tokens"); S.del("slots"); }
+      S.set("cid", cid);
+    }
+    st.textContent = ""; $("cid").value = ""; $("lfm").value = ""; $("setupCode").value = "";
+    editingKeys = false; render();
+  } catch (e) { st.className = "status err"; st.textContent = e.message; }
+  finally { $("saveCfg").disabled = false; }
+};
+$("login").onclick = () => login().catch(e => { $("authStatus").textContent = e.message; });
+$("logout").onclick = () => { S.del("tokens"); render(); };
+
+// search
+$("q").addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(doSearch, 300); });
+async function doSearch() {
+  const q = $("q").value.trim(), mine = ++searchSeq;
+  if (!q) { $("results").innerHTML = ""; return; }
+  try {
+    const results = await search(q);
+    if (mine !== searchSeq) return;
+    $("results").innerHTML = results.map((r, i) => `<li data-i="${i}">
+      ${r.image ? `<img class="thumb ${r.type === "artist" ? "round" : ""}" src="${esc(r.image)}" alt="">` : `<div class="thumb ${r.type === "artist" ? "round" : ""}"></div>`}
+      <div class="meta"><b>${esc(r.name)}</b><span>${r.type === "artist" ? "Artist" : "Song · " + esc(r.artist)}</span></div></li>`).join("");
+    [...$("results").children].forEach(li => li.onclick = () => select(results[+li.dataset.i], li));
+  } catch (e) { handleErr(e); }
+}
+function select(r, li) {
+  seed = r;
+  [...$("results").children].forEach(x => x.classList.toggle("sel", x === li));
+  $("seedLabel").innerHTML = `<b style="color:var(--text)">${esc(r.name)}</b><span>${r.type === "artist" ? "Artist" : esc(r.artist)}</span>`;
+  $("go").disabled = false;
+  document.activeElement?.blur();
+}
+$("np").onclick = async () => {
+  $("np").disabled = true;
+  try {
+    const t = await nowPlaying();
+    if (!t) { setStatus("Nothing is playing on Spotify right now.", true); return; }
+    $("q").value = ""; $("results").innerHTML = "";
+    select(t, null);
+    setStatus(`${t.playing ? "Now playing" : "Paused on"}: ${esc(t.name)} · ${esc(t.artist)}`);
+  } catch (e) { handleErr(e); }
+  finally { $("np").disabled = false; }
+};
+
+// build + send
+$("reroll").onclick = () => $("go").click();
+$("go").onclick = async () => {
+  if (!seed) return;
+  $("go").disabled = $("reroll").disabled = true;
+  setStatus('<span class="spin"></span>Wandering through similar music…');
+  try {
+    preview = await buildRadio(seed, (d, n) => setStatus(`<span class="spin"></span>Finding songs on Spotify… ${Math.round(d / n * 100)}%`));
+    $("outSeed").textContent = preview.seed;
+    $("tracks").innerHTML = preview.tracks.map(t => `<li><span>${esc(t.name)} <span class="a">· ${esc(t.artist)}</span></span></li>`).join("");
+    $("out").classList.remove("hidden");
+    renderSlots();
+    setStatus(`${preview.tracks.length} songs ready. Have a look, then pick a slot.`);
+    $("out").scrollIntoView({ behavior: "smooth", block: "start" });
+  } catch (e) { handleErr(e); }
+  finally { $("go").disabled = $("reroll").disabled = false; }
+};
+async function doSend(slot) {
+  if (!preview || sending) return;
+  sending = true; renderSlots();
+  setStatus(`<span class="spin"></span>Sending to Slot ${slot}…`);
+  try {
+    const r = await sendToSlot(slot, preview);
+    setStatus(`Sent to <b>${esc(r.name)}</b>. <a href="${esc(r.url)}" target="_blank" rel="noopener">Open in Spotify ↗</a>`);
+    sending = false; renderSlots(slot);
+  } catch (e) { sending = false; renderSlots(); handleErr(e); }
+}
+
+// boot
+(async () => {
+  await handleRedirect();
+  render();
+  if (S.get("tokens")?.refresh) discoverSlots().then(() => renderSlots()).catch(() => {});
+})();
+</script>
+</body>
+</html>
