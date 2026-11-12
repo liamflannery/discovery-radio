@@ -573,7 +573,7 @@ $("saveCfg").onclick = async () => {
   let cid = $("cid").value.trim(), lfm = $("lfm").value.trim();
   const code = $("setupCode").value.trim();
   if (code) {
-    const m = /^DR1:([0-9a-fA-F]{32}):([0-9a-fA-F]{32})$/.exec(code);
+    const m = /^DR1:\s*([0-9a-f]{32})\s*:\s*([0-9a-f]{32})$/i.exec(code.replace(/\s+/g, ""));
     if (!m) { st.className = "status err"; st.textContent = "That setup code doesn't look right. It should start with DR1:"; return; }
     [cid, lfm] = [m[1], m[2]];
   }
